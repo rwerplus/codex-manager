@@ -399,8 +399,8 @@ async function handleOutlookImport() {
         elements.importResult.style.display = 'block';
         elements.importResult.innerHTML = `
             <div class="import-stats">
-                <span>✅ 成功导入: <strong>${result.success_count || 0}</strong></span>
-                <span>❌ 失败: <strong>${result.failed_count || 0}</strong></span>
+                <span>✅ 成功导入: <strong>${result.success || 0}</strong></span>
+                <span>❌ 失败: <strong>${result.failed || 0}</strong></span>
             </div>
             ${result.errors?.length ? `
                 <div class="import-errors" style="margin-top: var(--spacing-sm);">
@@ -412,8 +412,8 @@ async function handleOutlookImport() {
             ` : ''}
         `;
 
-        if (result.success_count > 0) {
-            toast.success(`成功导入 ${result.success_count} 个账户`);
+        if (result.success > 0) {
+            toast.success(`成功导入 ${result.success} 个账户`);
             loadOutlookServices();
             loadStats();
             elements.outlookImportData.value = '';
