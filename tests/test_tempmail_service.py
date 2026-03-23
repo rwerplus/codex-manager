@@ -43,14 +43,14 @@ def test_get_verification_code_ignores_messages_not_newer_than_otp_anchor(monkey
                         "from": "noreply@openai.com",
                         "subject": "Old verification code",
                         "body": "111111",
-                        "date": 1999,
+                        "received_at": 1999,
                     },
                     {
                         "id": "new-mail",
                         "from": "noreply@openai.com",
                         "subject": "New verification code",
                         "body": "654321",
-                        "date": 2001,
+                        "received_at": 2001,
                     },
                 ]
             },
