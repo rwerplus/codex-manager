@@ -119,6 +119,8 @@ class DatabaseSessionManager:
             ("newapi_services", "channel_models", "TEXT"),
             ("proxies", "is_default", "BOOLEAN DEFAULT 0"),
             ("cpa_services", "include_proxy_url", "BOOLEAN DEFAULT 0"),
+            ("sub2api_services", "group_id", "INTEGER"),
+            ("sub2api_services", "group_name", "VARCHAR(200) DEFAULT ''"),
         ]
 
         # 确保新表存在（create_tables 已处理，此处兜底）

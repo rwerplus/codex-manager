@@ -2,14 +2,16 @@
 Sub2API 服务管理 API 路由
 """
 
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ....database import crud
 from ....database.session import get_db
-from ....core.upload.sub2api_upload import test_sub2api_connection, batch_upload_to_sub2api
+from ....core.upload.sub2api_upload import test_sub2api_connection, batch_upload_to_sub2api, fetch_sub2api_groups
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -21,6 +23,8 @@ class Sub2ApiServiceCreate(BaseModel):
     api_key: str
     enabled: bool = True
     priority: int = 0
+    group_id: Optional[int] = None
+    group_name: str = ""
 
 
 class Sub2ApiServiceUpdate(BaseModel):
@@ -29,6 +33,8 @@ class Sub2ApiServiceUpdate(BaseModel):
     api_key: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
+    group_id: Optional[int] = -1  # -1 means not provided; None means clear
+    group_name: Optional[str] = None
 
 
 class Sub2ApiServiceResponse(BaseModel):
@@ -38,6 +44,8 @@ class Sub2ApiServiceResponse(BaseModel):
     has_key: bool
     enabled: bool
     priority: int
+    group_id: Optional[int] = None
+    group_name: str = ""
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -57,6 +65,11 @@ class Sub2ApiUploadRequest(BaseModel):
     priority: int = 50
 
 
+class Sub2ApiFetchGroupsRequest(BaseModel):
+    api_url: str
+    api_key: str
+
+
 def _to_response(svc) -> Sub2ApiServiceResponse:
     return Sub2ApiServiceResponse(
         id=svc.id,
@@ -65,6 +78,8 @@ def _to_response(svc) -> Sub2ApiServiceResponse:
         has_key=bool(svc.api_key),
         enabled=svc.enabled,
         priority=svc.priority,
+        group_id=svc.group_id,
+        group_name=svc.group_name or "",
         created_at=svc.created_at.isoformat() if svc.created_at else None,
         updated_at=svc.updated_at.isoformat() if svc.updated_at else None,
     )
@@ -91,6 +106,8 @@ async def create_sub2api_service(request: Sub2ApiServiceCreate):
             api_key=request.api_key,
             enabled=request.enabled,
             priority=request.priority,
+            group_id=request.group_id,
+            group_name=request.group_name,
         )
         return _to_response(svc)
 
@@ -119,6 +136,8 @@ async def get_sub2api_service_full(service_id: int):
             "api_key": svc.api_key,
             "enabled": svc.enabled,
             "priority": svc.priority,
+            "group_id": svc.group_id,
+            "group_name": svc.group_name or "",
         }
 
 
@@ -142,6 +161,11 @@ async def update_sub2api_service(service_id: int, request: Sub2ApiServiceUpdate)
             update_data["enabled"] = request.enabled
         if request.priority is not None:
             update_data["priority"] = request.priority
+        # group_id: -1 表示未提供，None 表示清除，其他值表示设置
+        if request.group_id != -1:
+            update_data["group_id"] = request.group_id
+        if request.group_name is not None:
+            update_data["group_name"] = request.group_name
 
         svc = crud.update_sub2api_service(db, service_id, **update_data)
         return _to_response(svc)
@@ -178,6 +202,30 @@ async def test_sub2api_connection_direct(request: Sub2ApiTestRequest):
     return {"success": success, "message": message}
 
 
+@router.post("/fetch-groups")
+async def fetch_groups(request: Sub2ApiFetchGroupsRequest):
+    """从 Sub2API 服务获取分组列表（用于前端下拉选择）"""
+    if not request.api_url or not request.api_key:
+        raise HTTPException(status_code=400, detail="api_url 和 api_key 不能为空")
+    success, data = fetch_sub2api_groups(request.api_url, request.api_key)
+    if not success:
+        return {"success": False, "message": data, "groups": []}
+    return {"success": True, "groups": data}
+
+
+@router.post("/{service_id}/fetch-groups")
+async def fetch_groups_by_service(service_id: int):
+    """根据已保存的服务配置获取分组列表"""
+    with get_db() as db:
+        svc = crud.get_sub2api_service_by_id(db, service_id)
+        if not svc:
+            raise HTTPException(status_code=404, detail="Sub2API 服务不存在")
+        success, data = fetch_sub2api_groups(svc.api_url, svc.api_key)
+        if not success:
+            return {"success": False, "message": data, "groups": []}
+        return {"success": True, "groups": data}
+
+
 @router.post("/upload")
 async def upload_accounts_to_sub2api(request: Sub2ApiUploadRequest):
     """批量上传账号到 Sub2API 平台"""
@@ -196,6 +244,7 @@ async def upload_accounts_to_sub2api(request: Sub2ApiUploadRequest):
 
         api_url = svc.api_url
         api_key = svc.api_key
+        group_id = svc.group_id
 
     results = batch_upload_to_sub2api(
         request.account_ids,
@@ -203,5 +252,6 @@ async def upload_accounts_to_sub2api(request: Sub2ApiUploadRequest):
         api_key,
         concurrency=request.concurrency,
         priority=request.priority,
+        group_id=group_id,
     )
     return results

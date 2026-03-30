@@ -1275,6 +1275,7 @@ async def batch_upload_accounts_to_sub2api(request: BatchSub2ApiUploadRequest):
     # 解析指定的 Sub2API 服务
     api_url = None
     api_key = None
+    group_id = None
     if request.service_id:
         with get_db() as db:
             svc = crud.get_sub2api_service_by_id(db, request.service_id)
@@ -1282,12 +1283,14 @@ async def batch_upload_accounts_to_sub2api(request: BatchSub2ApiUploadRequest):
                 raise HTTPException(status_code=404, detail="指定的 Sub2API 服务不存在")
             api_url = svc.api_url
             api_key = svc.api_key
+            group_id = svc.group_id
     else:
         with get_db() as db:
             svcs = crud.get_sub2api_services(db, enabled=True)
             if svcs:
                 api_url = svcs[0].api_url
                 api_key = svcs[0].api_key
+                group_id = svcs[0].group_id
 
     if not api_url or not api_key:
         raise HTTPException(status_code=400, detail="未找到可用的 Sub2API 服务，请先在设置中配置")
@@ -1302,6 +1305,7 @@ async def batch_upload_accounts_to_sub2api(request: BatchSub2ApiUploadRequest):
         ids, api_url, api_key,
         concurrency=request.concurrency,
         priority=request.priority,
+        group_id=group_id,
     )
     return results
 
@@ -1316,6 +1320,7 @@ async def upload_account_to_sub2api(account_id: int, request: Optional[Sub2ApiUp
 
     api_url = None
     api_key = None
+    group_id = None
     if service_id:
         with get_db() as db:
             svc = crud.get_sub2api_service_by_id(db, service_id)
@@ -1323,12 +1328,14 @@ async def upload_account_to_sub2api(account_id: int, request: Optional[Sub2ApiUp
                 raise HTTPException(status_code=404, detail="指定的 Sub2API 服务不存在")
             api_url = svc.api_url
             api_key = svc.api_key
+            group_id = svc.group_id
     else:
         with get_db() as db:
             svcs = crud.get_sub2api_services(db, enabled=True)
             if svcs:
                 api_url = svcs[0].api_url
                 api_key = svcs[0].api_key
+                group_id = svcs[0].group_id
 
     if not api_url or not api_key:
         raise HTTPException(status_code=400, detail="未找到可用的 Sub2API 服务，请先在设置中配置")
@@ -1342,7 +1349,8 @@ async def upload_account_to_sub2api(account_id: int, request: Optional[Sub2ApiUp
 
         success, message = upload_to_sub2api(
             [account], api_url, api_key,
-            concurrency=concurrency, priority=priority
+            concurrency=concurrency, priority=priority,
+            group_id=group_id,
         )
         if success:
             return {"success": True, "message": message}

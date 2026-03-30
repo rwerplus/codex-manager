@@ -393,6 +393,11 @@ function initEventListeners() {
     if (elements.testSub2ApiServiceBtn) {
         elements.testSub2ApiServiceBtn.addEventListener('click', handleTestSub2ApiService);
     }
+    // 获取分组按钮
+    const fetchGroupsBtn = document.getElementById('fetch-sub2api-groups-btn');
+    if (fetchGroupsBtn) {
+        fetchGroupsBtn.addEventListener('click', handleFetchSub2ApiGroups);
+    }
 }
 
 // 加载设置
@@ -1779,7 +1784,7 @@ async function loadSub2ApiServices() {
         renderSub2ApiServices(services);
     } catch (e) {
         if (elements.sub2ApiServicesTable) {
-            elements.sub2ApiServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">加载失败</td></tr>';
+            elements.sub2ApiServicesTable.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">加载失败</td></tr>';
         }
     }
 }
@@ -1787,13 +1792,14 @@ async function loadSub2ApiServices() {
 function renderSub2ApiServices(services) {
     if (!elements.sub2ApiServicesTable) return;
     if (!services || services.length === 0) {
-        elements.sub2ApiServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 Sub2API 服务，点击「添加服务」新增</td></tr>';
+        elements.sub2ApiServicesTable.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 Sub2API 服务，点击「添加服务」新增</td></tr>';
         return;
     }
     elements.sub2ApiServicesTable.innerHTML = services.map(s => `
         <tr>
             <td>${escapeHtml(s.name)}</td>
             <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="font-size:0.85rem;color:var(--text-muted);">${s.group_name ? escapeHtml(s.group_name) : '<span style="color:var(--text-muted);opacity:0.5;">-</span>'}</td>
             <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
             <td style="text-align:center;">${s.priority}</td>
             <td style="white-space:nowrap;">
@@ -1810,12 +1816,19 @@ function openSub2ApiServiceModal(svc = null) {
     elements.sub2ApiServiceModalTitle.textContent = svc ? '编辑 Sub2API 服务' : '添加 Sub2API 服务';
     elements.sub2ApiServiceForm.reset();
     document.getElementById('sub2api-service-id').value = svc ? svc.id : '';
+    // 重置分组下拉
+    const groupSelect = document.getElementById('sub2api-service-group');
+    groupSelect.innerHTML = '<option value="">不绑定分组</option>';
     if (svc) {
         document.getElementById('sub2api-service-name').value = svc.name || '';
         document.getElementById('sub2api-service-url').value = svc.api_url || '';
         document.getElementById('sub2api-service-priority').value = svc.priority ?? 0;
         document.getElementById('sub2api-service-enabled').checked = svc.enabled !== false;
         document.getElementById('sub2api-service-key').placeholder = svc.has_key ? '已配置，留空保持不变' : '请输入 API Key';
+        // 编辑时自动加载分组并选中
+        if (svc.id) {
+            _loadGroupsForService(svc.id, svc.group_id);
+        }
     }
     elements.sub2ApiServiceEditModal.classList.add('active');
 }
@@ -1849,12 +1862,17 @@ async function deleteSub2ApiService(id, name) {
 async function handleSaveSub2ApiService(e) {
     e.preventDefault();
     const id = document.getElementById('sub2api-service-id').value;
+    const groupSelect = document.getElementById('sub2api-service-group');
+    const selectedGroupId = groupSelect.value ? parseInt(groupSelect.value) : null;
+    const selectedGroupName = groupSelect.value ? groupSelect.options[groupSelect.selectedIndex].text : '';
     const data = {
         name: document.getElementById('sub2api-service-name').value,
         api_url: document.getElementById('sub2api-service-url').value,
         api_key: document.getElementById('sub2api-service-key').value || undefined,
         priority: parseInt(document.getElementById('sub2api-service-priority').value) || 0,
         enabled: document.getElementById('sub2api-service-enabled').checked,
+        group_id: selectedGroupId,
+        group_name: selectedGroupName,
     };
     if (!id && !data.api_key) {
         toast.error('请填写 API Key');
@@ -1874,6 +1892,90 @@ async function handleSaveSub2ApiService(e) {
         loadSub2ApiServices();
     } catch (e) {
         toast.error('保存失败: ' + e.message);
+    }
+}
+
+// 获取分组列表（根据已保存的服务 ID）
+async function _loadGroupsForService(serviceId, selectedGroupId = null) {
+    const groupSelect = document.getElementById('sub2api-service-group');
+    const fetchBtn = document.getElementById('fetch-sub2api-groups-btn');
+    fetchBtn.disabled = true;
+    fetchBtn.textContent = '加载中...';
+    try {
+        const result = await api.post(`/sub2api-services/${serviceId}/fetch-groups`);
+        if (result.success && Array.isArray(result.groups)) {
+            _populateGroupDropdown(result.groups, selectedGroupId);
+        }
+    } catch (e) {
+        console.warn('加载分组失败:', e.message);
+        // 如果服务已有 group_id，保留原值
+        if (selectedGroupId) {
+            const opt = document.createElement('option');
+            opt.value = selectedGroupId;
+            opt.textContent = `分组 #${selectedGroupId}`;
+            opt.selected = true;
+            groupSelect.appendChild(opt);
+        }
+    } finally {
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '🔄 获取分组';
+    }
+}
+
+// 手动获取分组（用于新建服务时，用表单中的 URL + Key）
+async function handleFetchSub2ApiGroups() {
+    const apiUrl = document.getElementById('sub2api-service-url').value.trim();
+    const apiKey = document.getElementById('sub2api-service-key').value.trim();
+    const id = document.getElementById('sub2api-service-id').value;
+
+    // 编辑时使用已保存的服务信息
+    if (id && !apiKey) {
+        const groupSelect = document.getElementById('sub2api-service-group');
+        const currentGroupId = groupSelect.value || null;
+        await _loadGroupsForService(id, currentGroupId ? parseInt(currentGroupId) : null);
+        return;
+    }
+
+    if (!apiUrl) {
+        toast.error('请先填写 API URL');
+        return;
+    }
+    if (!apiKey) {
+        toast.error('请先填写 API Key');
+        return;
+    }
+
+    const fetchBtn = document.getElementById('fetch-sub2api-groups-btn');
+    fetchBtn.disabled = true;
+    fetchBtn.textContent = '加载中...';
+
+    try {
+        const result = await api.post('/sub2api-services/fetch-groups', { api_url: apiUrl, api_key: apiKey });
+        if (result.success && Array.isArray(result.groups)) {
+            _populateGroupDropdown(result.groups, null);
+            toast.success(`已加载 ${result.groups.length} 个分组`);
+        } else {
+            toast.error(result.message || '获取分组失败');
+        }
+    } catch (e) {
+        toast.error('获取分组失败: ' + e.message);
+    } finally {
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '🔄 获取分组';
+    }
+}
+
+function _populateGroupDropdown(groups, selectedGroupId) {
+    const groupSelect = document.getElementById('sub2api-service-group');
+    groupSelect.innerHTML = '<option value="">不绑定分组</option>';
+    for (const g of groups) {
+        const opt = document.createElement('option');
+        opt.value = g.id;
+        opt.textContent = `${g.name}${g.platform ? ' (' + g.platform + ')' : ''}`;
+        if (selectedGroupId && g.id == selectedGroupId) {
+            opt.selected = true;
+        }
+        groupSelect.appendChild(opt);
     }
 }
 

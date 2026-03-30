@@ -270,13 +270,14 @@ MyProxy|socks5://user:pass@host:port"></textarea>
                                     <tr>
                                         <th style="width:150px;">名称</th>
                                         <th>API URL</th>
+                                        <th style="width:150px;">分组</th>
                                         <th style="width:80px;">状态</th>
                                         <th style="width:60px;text-align:center;">优先级</th>
                                         <th style="width:220px;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="sub2api-services-table">
-                                    <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
+                                    <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -404,6 +405,16 @@ MyProxy|socks5://user:pass@host:port"></textarea>
                             <div class="form-group">
                                 <label for="sub2api-service-key">API Key</label>
                                 <input type="password" id="sub2api-service-key" placeholder="编辑时留空则保持原值" autocomplete="new-password">
+                            </div>
+                            <div class="form-group">
+                                <label for="sub2api-service-group">绑定分组</label>
+                                <div style="display:flex;gap:8px;align-items:center;">
+                                    <select id="sub2api-service-group" style="flex:1;">
+                                        <option value="">不绑定分组</option>
+                                    </select>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="fetch-sub2api-groups-btn" style="white-space:nowrap;">🔄 获取分组</button>
+                                </div>
+                                <p class="hint">填写 API URL 和 API Key 后，点击「获取分组」加载可选分组列表。上传账号时会自动绑定到选中的分组。</p>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
