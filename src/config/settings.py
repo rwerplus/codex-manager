@@ -250,6 +250,30 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         category=SettingCategory.REGISTRATION,
         description="注册间隔最大值（秒）"
     ),
+    "five_sim_api_key": SettingDefinition(
+        db_key="registration.five_sim_api_key",
+        default_value="",
+        category=SettingCategory.REGISTRATION,
+        description="5Sim 接码平台 API Key",
+    ),
+    "five_sim_country": SettingDefinition(
+        db_key="registration.five_sim_country",
+        default_value="usa",
+        category=SettingCategory.REGISTRATION,
+        description="5Sim 接码国家（如 usa, england, russia）",
+    ),
+    "five_sim_operator": SettingDefinition(
+        db_key="registration.five_sim_operator",
+        default_value="any",
+        category=SettingCategory.REGISTRATION,
+        description="5Sim 运营商（any 为自动选择）",
+    ),
+    "five_sim_product": SettingDefinition(
+        db_key="registration.five_sim_product",
+        default_value="openai",
+        category=SettingCategory.REGISTRATION,
+        description="5Sim 产品名（openai）",
+    ),
 
     # 邮箱服务配置
     "email_service_priority": SettingDefinition(
@@ -701,6 +725,10 @@ class Settings(BaseModel):
     registration_default_password_length: int = 14
     registration_sleep_min: int = 5
     registration_sleep_max: int = 30
+    five_sim_api_key: str = ""
+    five_sim_country: str = "usa"
+    five_sim_operator: str = "any"
+    five_sim_product: str = "openai"
 
     # 邮箱服务配置
     email_service_priority: Dict[str, int] = {"tempmail": 0, "outlook": 1, "moe_mail": 2}

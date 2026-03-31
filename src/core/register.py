@@ -27,6 +27,7 @@ from ..config.constants import (
     PASSWORD_CHARSET,
 )
 from ..config.settings import get_settings
+from ..services.sms_5sim import FiveSimService
 from ..database import crud
 from ..database.session import get_db
 from ..services import BaseEmailService
@@ -193,6 +194,8 @@ class RegistrationEngine:
         self.session_token: Optional[str] = None  # 会话令牌
         self.logs: list = []
         self._otp_sent_at: Optional[float] = None  # OTP 发送时间戳
+        self._otp_continue_url: Optional[str] = None  # OTP 验证后的 continue_url
+        self._create_account_continue_url: Optional[str] = None  # create_account 后的 continue_url
         self._is_existing_account: bool = False  # 是否为已注册账号（用于自动登录）
         self.phase_history: list[PhaseResult] = []
         self.check_cancelled: Optional[Callable[[], bool]] = None
@@ -870,7 +873,20 @@ class RegistrationEngine:
             )
 
             self._log(f"验证码校验状态: {response.status_code}")
-            return response.status_code == 200
+            if response.status_code != 200:
+                return False
+
+            # 保存 continue_url 供后续步骤使用
+            try:
+                payload = response.json() or {}
+                continue_url = str(payload.get("continue_url") or "").strip() or None
+                if continue_url:
+                    self._log(f"验证码校验获得 continue_url: {continue_url[:100]}...")
+                    self._otp_continue_url = continue_url
+            except Exception:
+                pass
+
+            return True
 
         except Exception as e:
             self._log(f"验证验证码失败: {e}", "error")
@@ -894,10 +910,21 @@ class RegistrationEngine:
             )
 
             self._log(f"账户创建状态: {response.status_code}")
+            self._log(f"账户创建响应: {(response.text or '')[:500]}", "debug")
 
             if response.status_code != 200:
                 self._log(f"账户创建失败: {response.text[:200]}", "warning")
                 return False
+
+            # 保存 create_account 返回的 continue_url
+            try:
+                payload = response.json() or {}
+                continue_url = str(payload.get("continue_url") or "").strip()
+                if continue_url:
+                    self._log(f"create_account 返回 continue_url: {continue_url[:120]}")
+                    self._create_account_continue_url = continue_url
+            except Exception:
+                pass
 
             return True
 
@@ -922,6 +949,9 @@ class RegistrationEngine:
                     continue
 
                 found_cookie = True
+                # 调试：打印 cookie 解码后的顶层 key，帮助排查结构变化
+                for auth_json in self._decode_cookie_json_candidates(auth_cookie):
+                    self._log(f"Cookie [{cookie_name}] 解码后顶层 keys: {list(auth_json.keys())}", "debug")
                 workspace_id = self._extract_workspace_id_from_cookie(auth_cookie)
                 if workspace_id:
                     self._log(f"Workspace ID: {workspace_id}")
@@ -929,6 +959,9 @@ class RegistrationEngine:
 
             if not found_cookie:
                 self._log("未能获取到授权 Cookie", "error")
+                all_cookies = {c.name: c.value[:30] + "..." if c.value and len(c.value) > 30 else c.value
+                               for c in self.session.cookies}
+                self._log(f"当前所有 Cookie 名称: {list(all_cookies.keys())}", "debug")
                 return None
 
             self._log("授权 Cookie 里没有 workspace 信息", "error")
@@ -1117,10 +1150,13 @@ class RegistrationEngine:
 
         return None
 
-    def _select_workspace(self, workspace_id: str) -> Optional[str]:
-        """选择 Workspace"""
+    def _select_workspace(self, workspace_id: str = "") -> Optional[str]:
+        """选择 Workspace，workspace_id 为空时让服务端自动选择默认 workspace"""
         try:
-            select_body = f'{{"workspace_id":"{workspace_id}"}}'
+            if workspace_id:
+                select_body = f'{{"workspace_id":"{workspace_id}"}}'
+            else:
+                select_body = "{}"
 
             response = self.session.post(
                 OPENAI_API_ENDPOINTS["select_workspace"],
@@ -1129,16 +1165,49 @@ class RegistrationEngine:
                     "content-type": "application/json",
                 },
                 data=select_body,
+                allow_redirects=False,
             )
+
+            self._log(
+                f"workspace/select 状态: {response.status_code}, "
+                f"最终URL: {getattr(response, 'url', '?')}, "
+                f"Location: {response.headers.get('location', 'N/A')}",
+                "debug",
+            )
+
+            # 若被 302 重定向，说明 session 还没到 workspace 阶段
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("location", "")
+                self._log(f"workspace/select 被重定向到: {location}", "warning")
+                # 如果重定向到 consent 页且带有 workspace 信息，尝试从 URL 提取
+                workspace_id_from_url = self._extract_workspace_id_from_url(location)
+                if workspace_id_from_url:
+                    self._log(f"从重定向 URL 提取到 workspace_id: {workspace_id_from_url}")
+                    # 不跟随重定向，用提取到的 workspace_id 重新调用
+                    return self._select_workspace(workspace_id_from_url)
+                return None
 
             if response.status_code != 200:
                 self._log(f"选择 workspace 失败: {response.status_code}", "error")
-                self._log(f"响应: {response.text[:200]}", "warning")
+                self._log(f"响应: {(response.text or '')[:200]}", "warning")
                 return None
 
-            continue_url = str((response.json() or {}).get("continue_url") or "").strip()
+            # 检查返回的是 JSON 还是 HTML
+            content_type = response.headers.get("content-type", "")
+            if "text/html" in content_type:
+                self._log(f"workspace/select 返回了 HTML (content-type: {content_type})，session 可能未到 workspace 阶段", "warning")
+                self._log(f"HTML 前 500 字符: {(response.text or '')[:500]}", "debug")
+                return None
+
+            try:
+                resp_json = response.json() or {}
+            except Exception as e:
+                self._log(f"workspace/select 响应解析失败: {e}", "error")
+                return None
+
+            continue_url = str(resp_json.get("continue_url") or "").strip()
             if not continue_url:
-                self._log("workspace/select 响应里缺少 continue_url", "error")
+                self._log(f"workspace/select 响应里缺少 continue_url, 响应: {str(resp_json)[:300]}", "error")
                 return None
 
             self._log(f"Continue URL: {continue_url[:100]}...")
@@ -1463,6 +1532,108 @@ class RegistrationEngine:
             self._log("登录流程验证码校验失败", "warning")
             return None, None
 
+        self._log(f"OTP 验证成功, continue_url: {consent_url or 'None'}")
+
+        # 如果 continue_url 指向 add-phone，通过 5sim 接码完成手机验证
+        if consent_url and "add-phone" in consent_url:
+            self._log("检测到 add-phone（手机验证必填），通过接码平台完成...")
+            self._emit_status("phone_verify", "手机验证（接码中）")
+
+            settings = get_settings()
+            api_key = settings.five_sim_api_key
+            if not api_key:
+                self._log("未配置 5Sim API Key，无法完成手机验证。请在设置中配置 five_sim_api_key", "error")
+                return None, None
+
+            sms_service = FiveSimService(
+                api_key=api_key,
+                country=settings.five_sim_country,
+                operator=settings.five_sim_operator,
+                product=settings.five_sim_product,
+            )
+            order = None
+            consent_url = None
+            try:
+                # 1. 购买号码
+                order = sms_service.buy_number()
+                phone_number = str(order.get("phone", ""))
+                order_id = order.get("id")
+                self._log(f"5Sim 购买号码: +{phone_number}, order_id={order_id}")
+
+                # 2. GET add-phone 页面建立 session 状态
+                try:
+                    self.session.get("https://auth.openai.com/add-phone", timeout=15)
+                except Exception:
+                    pass
+
+                # 3. 提交手机号到 OpenAI
+                self._emit_status("phone_verify", f"提交手机号 +{phone_number[:4]}***")
+                send_body = json.dumps({"phone_number": f"+{phone_number}"})
+                send_resp = self.session.post(
+                    OPENAI_API_ENDPOINTS["phone_send"],
+                    headers={
+                        "referer": "https://auth.openai.com/add-phone",
+                        "accept": "application/json",
+                        "content-type": "application/json",
+                    },
+                    data=send_body,
+                )
+                self._log(f"phone_send 状态: {send_resp.status_code}, 响应: {(send_resp.text or '')[:300]}", "debug")
+                if send_resp.status_code != 200:
+                    self._log(f"提交手机号失败: {send_resp.status_code} {(send_resp.text or '')[:200]}", "error")
+                    sms_service.cancel_order(order_id)
+                    return None, None
+
+                # 4. 等待 5sim 接收验证码
+                self._emit_status("phone_verify", "等待手机验证码...")
+                sms_code = sms_service.wait_for_code(order_id, timeout=120, poll_interval=3)
+                if not sms_code:
+                    self._log("等待手机验证码超时", "error")
+                    sms_service.cancel_order(order_id)
+                    return None, None
+
+                self._log(f"收到手机验证码: {sms_code}")
+
+                # 5. 提交验证码到 OpenAI
+                self._emit_status("phone_verify", "验证手机验证码...")
+                verify_body = json.dumps({"phone_number": f"+{phone_number}", "code": sms_code})
+                verify_resp = self.session.post(
+                    OPENAI_API_ENDPOINTS["phone_verify"],
+                    headers={
+                        "referer": "https://auth.openai.com/add-phone",
+                        "accept": "application/json",
+                        "content-type": "application/json",
+                    },
+                    data=verify_body,
+                )
+                self._log(f"phone_verify 状态: {verify_resp.status_code}, 响应: {(verify_resp.text or '')[:300]}", "debug")
+
+                if verify_resp.status_code == 200:
+                    try:
+                        verify_json = verify_resp.json() or {}
+                        consent_url = str(verify_json.get("continue_url") or "").strip() or None
+                        self._log(f"手机验证成功, continue_url: {consent_url or 'None'}")
+                    except Exception:
+                        self._log("手机验证响应解析失败", "warning")
+                else:
+                    self._log(f"手机验证码校验失败: {verify_resp.status_code}", "error")
+                    sms_service.cancel_order(order_id)
+                    return None, None
+
+                # 6. 完成订单
+                sms_service.finish_order(order_id)
+
+            except Exception as e:
+                self._log(f"手机验证流程异常: {e}", "error")
+                if order:
+                    sms_service.cancel_order(order.get("id", 0))
+                return None, None
+
+            if not consent_url:
+                self._log("手机验证完成但未获得 continue_url", "warning")
+                return None, None
+
+        # 访问 consent 页面提取 workspace_id
         auth_target = consent_url or self.oauth_start.auth_url
         self._emit_status("workspace_extract", "请求 consent 页面并提取 Workspace ID")
         self._log(f"请求 consent 页面: {auth_target[:120]}...")
@@ -1472,10 +1643,16 @@ class RegistrationEngine:
         current_url = str(getattr(auth_response, "url", "") or "")
         html = auth_response.text or ""
 
+        self._log(f"consent 页面最终 URL: {current_url[:200]}", "debug")
+        self._log(f"consent 页面内容前 3000 字符: {html[:3000]}", "debug")
+
         if "sign-in-with-chatgpt/codex/consent" in current_url or 'action="/sign-in-with-chatgpt/codex/consent"' in html:
             workspace_id = self._extract_workspace_id_from_response(response=auth_response, html=html, url=current_url)
             if not workspace_id:
-                self._log("consent 页面缺少 workspace_id，回退到 Cookie 解析路径", "warning")
+                self._log("consent 页面缺少 workspace_id，尝试从 Cookie 中提取", "warning")
+                workspace_id = self._get_workspace_id()
+            if not workspace_id:
+                self._log("consent 页面和 Cookie 均无 workspace_id", "warning")
                 return None, None
 
             continue_url = self._select_workspace(workspace_id)
@@ -1485,6 +1662,8 @@ class RegistrationEngine:
             callback_url = self._follow_redirects(continue_url)
             return workspace_id, callback_url
 
+        # 页面可能已经是 callback 或其他可用状态
+        self._log(f"未到达 consent 页面，当前 URL: {current_url[:200]}", "warning")
         return None, None
 
     def _follow_redirects(self, start_url: str) -> Optional[str]:
@@ -1731,6 +1910,7 @@ class RegistrationEngine:
             callback_url = None
 
             if not self._is_existing_account:
+                # 新账号：通过重新登录推进到 consent 页面获取 workspace_id
                 self._raise_if_cancelled()
                 self._log(f"{next_step}. [新账号] 推进 Codex 授权流程...")
                 self._emit_status("oauth_reentry", "推进 Codex 授权流程", step_index=next_step)
@@ -1740,40 +1920,30 @@ class RegistrationEngine:
                     next_step += 1
 
             if not result.workspace_id:
-                # 获取 Workspace ID
-                self._raise_if_cancelled()
-                self._log(f"{next_step}. 获取 Workspace ID...")
-                self._emit_status("workspace_extract", "从授权态提取 Workspace ID", step_index=next_step)
-                workspace_id = self._get_workspace_id()
-                if not workspace_id:
-                    result.error_message = "获取 Workspace ID 失败"
-                    return result
-
-                result.workspace_id = workspace_id
-
-                next_step += 1
-
-                # 选择 Workspace
+                # 兜底：直接尝试 workspace/select（需要 workspace_id）
                 self._raise_if_cancelled()
                 self._log(f"{next_step}. 选择 Workspace...")
                 self._emit_status("workspace_select", "选择 Workspace", step_index=next_step)
-                continue_url = self._select_workspace(result.workspace_id)
-                if not continue_url:
-                    result.error_message = "选择 Workspace 失败"
-                    return result
+                # 尝试从 Cookie 获取 workspace_id
+                workspace_id = self._get_workspace_id()
+                if workspace_id:
+                    select_continue_url = self._select_workspace(workspace_id)
+                    if select_continue_url:
+                        result.workspace_id = workspace_id
+                        next_step += 1
 
-                next_step += 1
+                        self._raise_if_cancelled()
+                        self._log(f"{next_step}. 跟随重定向链...")
+                        self._emit_status("redirect_chain", "跟随授权重定向链", step_index=next_step)
+                        callback_url = self._follow_redirects(select_continue_url)
+                        if not callback_url:
+                            result.error_message = "跟随重定向链失败"
+                            return result
+                        next_step += 1
 
-                # 跟随重定向链
-                self._raise_if_cancelled()
-                self._log(f"{next_step}. 跟随重定向链...")
-                self._emit_status("redirect_chain", "跟随授权重定向链", step_index=next_step)
-                callback_url = self._follow_redirects(continue_url)
-                if not callback_url:
-                    result.error_message = "跟随重定向链失败"
-                    return result
-
-            next_step += 1
+            if not result.workspace_id:
+                result.error_message = "获取 Workspace ID 失败"
+                return result
 
             # 处理 OAuth 回调
             self._raise_if_cancelled()

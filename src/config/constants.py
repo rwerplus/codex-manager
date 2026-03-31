@@ -93,7 +93,15 @@ OPENAI_API_ENDPOINTS = {
     "validate_otp": "https://auth.openai.com/api/accounts/email-otp/validate",
     "create_account": "https://auth.openai.com/api/accounts/create_account",
     "select_workspace": "https://auth.openai.com/api/accounts/workspace/select",
+    "phone_send": "https://auth.openai.com/api/accounts/phone-sms/send",
+    "phone_verify": "https://auth.openai.com/api/accounts/phone-sms/verify",
 }
+
+# 5Sim 接码平台 API
+FIVE_SIM_API_BASE = "https://5sim.net/v1"
+FIVE_SIM_DEFAULT_PRODUCT = "openai"
+FIVE_SIM_DEFAULT_COUNTRY = "usa"
+FIVE_SIM_DEFAULT_OPERATOR = "any"
 
 # OpenAI 页面类型（用于判断账号状态）
 OPENAI_PAGE_TYPES = {

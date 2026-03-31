@@ -414,9 +414,23 @@ async function loadSettings() {
         // 注册配置
         document.getElementById('max-retries').value = data.registration?.max_retries || 3;
         document.getElementById('timeout').value = data.registration?.timeout || 120;
-        document.getElementById('password-length').value = data.registration?.default_password_length || 12;
+        document.getElementById('password-length').value = data.registration?.default_password_length || 14;
         document.getElementById('sleep-min').value = data.registration?.sleep_min || 5;
         document.getElementById('sleep-max').value = data.registration?.sleep_max || 30;
+
+        // 5Sim 配置
+        if (data.registration) {
+            const apiKeyInput = document.getElementById('five-sim-api-key');
+            if (apiKeyInput) {
+                apiKeyInput.value = data.registration.five_sim_api_key ? '********' : '';
+                if (data.registration.five_sim_api_key) {
+                    apiKeyInput.placeholder = '已配置，留空保持不变';
+                }
+            }
+            if (document.getElementById('five-sim-country')) document.getElementById('five-sim-country').value = data.registration.five_sim_country || 'usa';
+            if (document.getElementById('five-sim-operator')) document.getElementById('five-sim-operator').value = data.registration.five_sim_operator || 'any';
+            if (document.getElementById('five-sim-product')) document.getElementById('five-sim-product').value = data.registration.five_sim_product || 'openai';
+        }
 
         // 验证码等待配置
         if (data.email_code) {
@@ -562,6 +576,14 @@ async function handleSaveRegistration(e) {
         sleep_min: parseInt(document.getElementById('sleep-min').value),
         sleep_max: parseInt(document.getElementById('sleep-max').value),
     };
+
+    const apiKeyInput = document.getElementById('five-sim-api-key');
+    if (apiKeyInput && apiKeyInput.value && apiKeyInput.value !== '********') {
+        data.five_sim_api_key = apiKeyInput.value;
+    }
+    if (document.getElementById('five-sim-country')) data.five_sim_country = document.getElementById('five-sim-country').value;
+    if (document.getElementById('five-sim-operator')) data.five_sim_operator = document.getElementById('five-sim-operator').value;
+    if (document.getElementById('five-sim-product')) data.five_sim_product = document.getElementById('five-sim-product').value;
 
     try {
         await api.post('/settings/registration', data);

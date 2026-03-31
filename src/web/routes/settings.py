@@ -46,9 +46,13 @@ class RegistrationSettings(BaseModel):
     """注册设置"""
     max_retries: int = 3
     timeout: int = 120
-    default_password_length: int = 12
+    default_password_length: int = 14
     sleep_min: int = 5
     sleep_max: int = 30
+    five_sim_api_key: Optional[str] = None
+    five_sim_country: Optional[str] = None
+    five_sim_operator: Optional[str] = None
+    five_sim_product: Optional[str] = None
 
 
 class WebUISettings(BaseModel):
@@ -210,19 +214,32 @@ async def get_registration_settings():
         "default_password_length": settings.registration_default_password_length,
         "sleep_min": settings.registration_sleep_min,
         "sleep_max": settings.registration_sleep_max,
+        "five_sim_api_key": settings.five_sim_api_key,
+        "five_sim_country": settings.five_sim_country,
+        "five_sim_operator": settings.five_sim_operator,
+        "five_sim_product": settings.five_sim_product,
     }
 
 
 @router.post("/registration")
 async def update_registration_settings(request: RegistrationSettings):
     """更新注册设置"""
-    update_settings(
-        registration_max_retries=request.max_retries,
-        registration_timeout=request.timeout,
-        registration_default_password_length=request.default_password_length,
-        registration_sleep_min=request.sleep_min,
-        registration_sleep_max=request.sleep_max,
-    )
+    update_dict = {
+        "registration_max_retries": request.max_retries,
+        "registration_timeout": request.timeout,
+        "registration_default_password_length": request.default_password_length,
+        "registration_sleep_min": request.sleep_min,
+        "registration_sleep_max": request.sleep_max,
+    }
+    if request.five_sim_api_key is not None:
+        update_dict["five_sim_api_key"] = request.five_sim_api_key
+    if request.five_sim_country is not None:
+        update_dict["five_sim_country"] = request.five_sim_country
+    if request.five_sim_operator is not None:
+        update_dict["five_sim_operator"] = request.five_sim_operator
+    if request.five_sim_product is not None:
+        update_dict["five_sim_product"] = request.five_sim_product
+    update_settings(**update_dict)
 
     return {"success": True, "message": "注册设置已更新"}
 
