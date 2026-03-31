@@ -208,7 +208,7 @@ OPENAI_VERIFICATION_KEYWORDS = [
 
 # 密码生成
 PASSWORD_CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-DEFAULT_PASSWORD_LENGTH = 12
+DEFAULT_PASSWORD_LENGTH = 14
 
 # 用户信息生成（用于注册）
 
@@ -298,7 +298,7 @@ DEFAULT_SETTINGS = [
     ("proxy.port", "7890", "代理端口", "proxy"),
     ("registration.max_retries", "3", "最大重试次数", "registration"),
     ("registration.timeout", "120", "超时时间（秒）", "registration"),
-    ("registration.default_password_length", "12", "默认密码长度", "registration"),
+    ("registration.default_password_length", "14", "默认密码长度", "registration"),
     ("webui.host", DEFAULT_WEBUI_HOST, "Web UI 监听主机", "webui"),
     ("webui.port", str(DEFAULT_WEBUI_PORT), "Web UI 监听端口", "webui"),
     ("webui.debug", "true", "调试模式", "webui"),

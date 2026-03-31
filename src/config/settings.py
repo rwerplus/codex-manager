@@ -234,7 +234,7 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
     ),
     "registration_default_password_length": SettingDefinition(
         db_key="registration.default_password_length",
-        default_value=12,
+        default_value=14,
         category=SettingCategory.REGISTRATION,
         description="默认密码长度"
     ),
@@ -698,7 +698,7 @@ class Settings(BaseModel):
     # 注册配置
     registration_max_retries: int = 3
     registration_timeout: int = 120
-    registration_default_password_length: int = 12
+    registration_default_password_length: int = 14
     registration_sleep_min: int = 5
     registration_sleep_max: int = 30
 
